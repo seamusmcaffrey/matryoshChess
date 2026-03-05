@@ -1,0 +1,52 @@
+{
+  "base_seed": 20260305,
+  "max_plies": 220,
+  "workers": 14,
+  "target_hours": 8.0,
+  "utilization": 0.9,
+  "calibration_games": 96,
+  "snapshot_plies": [40, 80, 120],
+  "progress_flush_every_games": 64,
+  "variant_timebox_minutes": 18.0,
+  "write_raw_games": true,
+  "stage1": {
+    "num_variants": 120,
+    "seeds_per_variant": 10,
+    "min_games_per_seed": 10,
+    "max_games_per_seed": 70
+  },
+  "stage2": {
+    "elite_count": 15,
+    "mutations_per_elite": 3,
+    "seeds_per_variant": 14,
+    "min_games_per_seed": 12,
+    "max_games_per_seed": 80
+  },
+  "search_space": {
+    "ruleset": ["matryoshka", "matryoshka", "matryoshka", "normal", "circe", "anticirce"],
+    "tier2_slider_max_range": [3, 4, 5],
+    "tier3_slider_max_range": [1, 2],
+    "retaliation_strike_window": [1, 2, 3],
+    "fallback_policy": ["random", "king_proximity", "nearest_circe"],
+    "king_infinite_kill": [false, false, true],
+    "king_move_mode": ["normal", "king_k_range", "king_capture_line", "king_dash"],
+    "king_dash_max": [2, 3],
+    "king_k_range": [2, 3],
+    "king_capture_line_range": [2, 3, 4],
+    "king_capture_insta_kill": ["on", "adjacent_only", "off"],
+    "retaliation_enabled": [true, false],
+    "retaliation_targeting": ["highest_safe", "localized_safe", "top2_pool_safe"],
+    "retaliation_local_radius": [3, 4, 5],
+    "retaliation_tiebreak": ["random", "max_threat", "min_king_distance"],
+    "strike_effect": ["perma_kill", "double_demote"],
+    "stalemate_is_loss": [false, true],
+    "ko_repetition_illegal": [false, true],
+    "doom_clock_full_moves": [0, 16, 24, 32],
+    "doom_clock_effect": ["demote_random_non_king", "collapse_weakest", "bonus_capture_damage"],
+    "quiet_halfmove_limit": [0, 60, 100],
+    "knight_decay_mode": ["wazir", "camel", "diag_step"],
+    "collapse_target": ["pawn", "crippled_pawn"],
+    "crippled_pawn_can_promote": [false, true],
+    "win_condition": ["checkmate_or_king_capture", "checkmate_only"]
+  }
+}
