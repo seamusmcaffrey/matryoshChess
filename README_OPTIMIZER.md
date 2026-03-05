@@ -1,40 +1,31 @@
-# Variant Optimizer Harness
-
-## Run (full, ~8h target)
-```bash
-python3 run_variant_optimization.py \
-  --config optimizer_config.example.json \
-  --out outputs_run_$(date +%Y%m%d_%H%M)
-```
+# Phase 2 Optimizer Harness
 
 ## Run (open / no wall cap)
 ```bash
-WORKERS=12 TARGET_HOURS=6.0 ./run_optimizer_open.sh
+WORKERS=12 SAMPLE_SCALE=0.25 TARGET_DEPTH=3 MAX_NODES=80000 ./run_optimizer_open.sh
+```
+
+## Run (2h wall cap)
+```bash
+WORKERS=12 WALL_HOURS=2.0 SAMPLE_SCALE=0.25 TARGET_DEPTH=3 MAX_NODES=80000 ./run_optimizer_2h.sh
+```
+
+## Run (smoke sanity)
+```bash
+python3 run_phase2_study.py \
+  --out outputs_phase2_smoke_$(date +%Y%m%d_%H%M) \
+  --smoke
 ```
 Stop any time with `Ctrl+C`; partial outputs are preserved.
 
-## Run (smoke)
-```bash
-python3 run_variant_optimization.py \
-  --config optimizer_config.example.json \
-  --out outputs_run_smoke_$(date +%Y%m%d_%H%M) \
-  --smoke
-```
-
 ## Live Progress / Partial Artifacts
-- Terminal progress meter prints continuously during each variant:
-  - per-variant `% complete` bar
-  - per-stage `% complete` bar (games completed vs planned stage games)
+- Terminal progress meter prints continuously during each config.
 - `progress.jsonl` (append-only event log)
 - `run_state.json` (latest run status)
-- `variants/<variant_id>/partial_summary.json` (updated during run)
-- `variants/<variant_id>/games_partial.csv` (streaming game rows)
-- `variants/<variant_id>/draw_forensics.jsonl`
+- `config_<name>/summary.json` (per-config metrics)
+- `config_<name>/games.jsonl` (raw per-game rows)
+- `config_<name>/retaliation_analysis.md` (when retaliation is enabled)
 
 ## Final Aggregates
-- `variant_summary.csv`
-- `variant_table.md`
-- `pareto_frontier.md`
-- `optimizer_report.md`
-- `metric_glossary.md`
-- `draw_forensics/top_signatures.md`
+- `study_summary.csv`
+- `study_report.md`
