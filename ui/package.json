@@ -4,11 +4,16 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host",
+    "server": "node server.js",
+    "dev:network": "node server.js & vite --host",
     "build": "vite build",
     "preview": "vite preview"
   },
   "devDependencies": {
     "vite": "^7.3.1"
+  },
+  "dependencies": {
+    "ws": "^8.19.0"
   }
 }

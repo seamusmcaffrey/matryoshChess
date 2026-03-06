@@ -22,21 +22,25 @@ ui/
     style.css             # All styles (board, pieces, effects, layout)
     board.js              # Board rendering and click handling
     game.js               # Game state, legal moves, Matryoshka rules
-    pieces.js             # Piece definitions, tier system, SVG mapping
+    pieces.js             # Piece definitions, tier system, image mapping
     retaliation.js        # Retaliation placement logic
     moves.js              # Move generation (per-piece, per-tier)
     ui-effects.js         # Smoke animation, highlights, tier badges
   public/
     pieces/
-      white/  K.svg Q.svg R.svg B.svg N.svg P.svg
-      black/  K.svg Q.svg R.svg B.svg N.svg P.svg
+      white/  K.png Q.png R.png B.png N.png P.png
+      black/  K.png Q.png R.png B.png N.png P.png
 ```
 
 ## Assets
 
-SVG chess pieces are already in `public/pieces/`. These are standard Staunton-style SVGs (Colin Burnett style, same as Lichess). White pieces: white fill, black stroke. Black pieces: black fill, white detail strokes. All use `viewBox="0 0 45 45"`.
+3D-rendered Staunton chess piece PNGs are in `public/pieces/`. Sourced from the Queenfall project (`/Users/seamus/Documents/prometheus/queenfall/src/assets/pieces/`). 1024x1024 RGBA with transparent backgrounds. White pieces are light gray, black pieces are dark charcoal. High quality — these are production assets, not placeholders.
 
-For degraded tiers, we overlay visual effects (opacity, size reduction, CSS filters) rather than needing separate SVG files per tier.
+Naming convention: `{color}/{TYPE}.png` where TYPE is single-letter (K, Q, R, B, N, P).
+
+Note: King images are 1024x1536 (taller aspect ratio). The black knight is also 1024x1536. CSS `object-fit: contain` handles this automatically.
+
+For degraded tiers, we overlay visual effects (opacity, size reduction, CSS filters) rather than needing separate image files per tier.
 
 ---
 
@@ -67,7 +71,7 @@ Each phase produces a visible result at localhost. Build them in order.
 - `createBoard()` — generates 64 square divs in an 8x8 CSS grid
 - Each square has `data-row` (0-7, top=0=rank8) and `data-col` (0-7, left=0=a-file)
 - `renderPieces(gameState)` — places `<img>` elements for each piece
-  - Image src: `/pieces/{color}/{type}.svg` where type is K/Q/R/B/N/P
+  - Image src: `/pieces/{color}/{type}.png` where type is K/Q/R/B/N/P
 - Board orientation: White at bottom (row 7 = rank 1)
 
 ### pieces.js
@@ -141,31 +145,32 @@ Each phase produces a visible result at localhost. Build them in order.
 
 ### pieces.js — Tier System
 
-```
-TIER_NAMES = { 1: 'Full', 2: 'Damaged', 3: 'Crippled', 4: 'Pawn' }
+Pieces keep their identity as they degrade — a queen stays a queen, just weaker. This matches the engine implementation (`simulate_variant_study.py:_demote_piece_for_capture`).
 
-DEGRADATION_PATH = {
-  Q: ['Q', 'R', 'B', 'P'],   // Queen → Rook → Bishop → Pawn
-  R: ['R', 'B', 'P'],         // Rook → Bishop → Pawn
-  B: ['B', 'P'],              // Bishop → Pawn
-  N: ['N', 'W', 'P'],         // Knight → Wazir → Pawn
-  P: [null],                   // Pawn → removed
-  K: [null],                   // King → game over (shouldn't happen via capture)
-}
+```
+TIER_NAMES = { 1: 'Full', 2: 'Damaged', 3: 'Crippled' }
+
+// Q/R/B: same piece type through tiers 1→2→3, then collapse to Pawn
+// N: becomes Wazir, then collapses to Pawn
+// P: captured = dead
+// K: never degrades (king permakill removes the captured piece instead)
 ```
 
-- `degradePiece(piece)` — returns new piece one tier down, or null if pawn
-  - Queen tier 1 → type becomes R, tier becomes 2
-  - Queen tier 2 (damaged rook) → type becomes B, tier becomes 3
-  - Queen tier 3 (crippled bishop) → type becomes P, tier becomes 4
-  - Queen tier 4 (pawn) → null (removed)
-  - Original type tracked in `piece.originalType` for visual identity
-- Wazir (degraded knight): moves 1 square orthogonally (like a rook with range 1)
+- `degradePiece(piece)` — mutates piece to next degradation level, returns true if it survives
+  - Queen/Rook/Bishop tier 1 → tier 2 (same type, range capped at 5)
+  - Queen/Rook/Bishop tier 2 → tier 3 (same type, range capped at 1)
+  - Queen/Rook/Bishop tier 3 → type becomes P, tier resets to 1 (collapse)
+  - Knight → type becomes W (Wazir), tier 1
+  - Wazir → type becomes P, tier 1 (collapse)
+  - Pawn → returns false (permanently removed)
+- Track `piece.originalType` so we can show "this pawn used to be a queen" badges
+- Wazir (W): moves 1 square orthogonally (like a range-1 rook)
 
 ### moves.js — Range Limits
+- Tier 1 (Full): normal movement
 - Tier 2 (Damaged): sliding range capped at 5 squares
 - Tier 3 (Crippled): sliding range capped at 1 square
-- Tier 4 (Pawn): moves as pawn regardless of original type
+- Collapsed pawns: move as pawns regardless of original type
 - Wazir: 1 square orthogonal only
 - Range limit applied in sliding move generation loop
 
@@ -178,18 +183,22 @@ DEGRADATION_PATH = {
 - King captures → permanent removal (king permakill)
 
 ### ui-effects.js — Tier Visuals
+
+The key visual: a queen that gets captured is still a queen, but she **physically shrinks** on the board and looks increasingly damaged. Same image, progressively smaller and more distressed.
+
 - CSS classes per tier applied to piece images:
-  - `.tier-1` — normal (no effect)
-  - `.tier-2` — slight opacity reduction (0.85), subtle amber border glow
-  - `.tier-3` — more opacity (0.7), piece scaled to 75%, red-ish tint via CSS filter
-  - `.tier-4` — pawn appearance but keep a tiny badge showing original piece type
-- Tier badge: small icon in corner of square showing original piece type (e.g., tiny queen icon on a degraded pawn that was originally a queen)
-- `renderTierBadge(piece)` — if `piece.originalType !== piece.type`, show badge
+  - `.tier-1` — full size, no effects (100% scale)
+  - `.tier-2` — visibly smaller (~85% scale), subtle amber/sepia damage tint, small "II" badge in corner
+  - `.tier-3` — noticeably small (~65% scale), stronger red/orange damage tint, "III" badge, piece looks battered
+  - Collapsed pawn — switches to pawn image but with a tiny badge of the original piece type in the corner (e.g., small queen silhouette means "this pawn used to be a queen")
+- The shrinking is the primary visual cue — you should be able to glance at the board and immediately see which pieces are degraded by their size
+- Tier badge: small indicator in bottom-right corner of square
+- `renderTierBadge(piece)` — shows tier numeral for damaged pieces, shows original type icon for collapsed pawns
 
 ### style.css additions
-- `.tier-2 img` — `opacity: 0.85; filter: sepia(0.2);`
-- `.tier-3 img` — `opacity: 0.7; transform: scale(0.75); filter: sepia(0.4) saturate(1.5);`
-- `.tier-badge` — tiny 14px icon positioned at bottom-right of square
+- `.tier-2 img` — `transform: scale(0.85); filter: sepia(0.2) brightness(0.95);`
+- `.tier-3 img` — `transform: scale(0.65); filter: sepia(0.4) saturate(1.5) brightness(0.85);`
+- `.tier-badge` — tiny 14px indicator positioned at bottom-right of square
 - Capture animation: brief flash on square when capture+degradation happens
 
 **Checkpoint:** Capturing pieces causes them to degrade visually and stay on board. King permanently kills.
@@ -324,7 +333,7 @@ These are the corrected/validated rules from Phase 4 testing:
 
 | Rule | Value |
 |---|---|
-| Piece degradation | Q→R(d)→B(c)→P→dead; N→Wazir→P→dead |
+| Piece degradation | Q/R/B: tier 1→2→3→collapse to Pawn→dead; N→Wazir→P→dead |
 | Tier 2 range cap | 5 squares |
 | Tier 3 range cap | 1 square |
 | Retaliation mode | attacker-rekill |
@@ -340,25 +349,27 @@ These are the corrected/validated rules from Phase 4 testing:
 
 ### Degradation Ladder (detailed)
 
-| Original | Tier 1 | Tier 2 (Damaged) | Tier 3 (Crippled) | Tier 4 (Collapse) | Tier 5 |
-|---|---|---|---|---|---|
-| Queen | Queen | Rook (range 5) | Bishop (range 1) | Pawn | Dead |
-| Rook | Rook | Bishop (range 5) | Pawn | Dead | — |
-| Bishop | Bishop | Pawn | Dead | — | — |
-| Knight | Knight | Wazir (1sq ortho) | Pawn | Dead | — |
-| Pawn | Pawn | Dead | — | — | — |
+Pieces keep their type through tiers 1→2→3, then collapse to Pawn. This matches `simulate_variant_study.py:_demote_piece_for_capture`.
+
+| Original | Tier 1 (Full) | Tier 2 (Damaged, range 5) | Tier 3 (Crippled, range 1) | Next capture |
+|---|---|---|---|---|
+| Queen | Queen | Queen | Queen | → Pawn |
+| Rook | Rook | Rook | Rook | → Pawn |
+| Bishop | Bishop | Bishop | Bishop | → Pawn |
+| Knight | Knight | → Wazir (1sq ortho) | — | → Pawn |
+| Pawn | Pawn | Dead | — | — |
 
 ### Retaliation Flow (per capture)
 
 ```
 1. White captures Black's Queen on e5
-2. Queen demotes → Damaged Rook (tier 2, range 5)
-3. Find square where Damaged Rook attacks White's highest-value piece
-   - Example: White Queen on d1 → place rook on d6 (attacks d1 along file)
-4. Damaged Rook appears on d6 with smoke effect (permakill vulnerable)
+2. Queen demotes → Damaged Queen (tier 2, range 5) — still a queen, just weaker
+3. Find square where Damaged Queen attacks White's highest-value piece
+   - Example: White Queen on d1 → place damaged queen on d6 (attacks d1 along file/diagonal)
+4. Damaged Queen appears on d6 with smoke effect (permakill vulnerable, visually smaller)
 5. White's NEXT move:
-   - If White captures the rook on d6 → PERMANENT REMOVAL (permakill)
-   - If White does anything else → rook on d6 becomes safe, smoke clears
+   - If White captures the queen on d6 → PERMANENT REMOVAL (permakill)
+   - If White does anything else → queen on d6 becomes safe, smoke clears
 ```
 
 ### King Permakill Flow
@@ -375,9 +386,10 @@ These are the corrected/validated rules from Phase 4 testing:
 
 - **No build dependencies beyond Vite.** Pure vanilla JS, no React/Vue/etc.
 - **All state in memory.** No backend, no persistence, no network.
-- **SVG pieces loaded as `<img>` tags** pointing to `/pieces/{color}/{type}.svg`. Vite serves `public/` at root.
+- **Piece PNGs loaded as `<img>` tags** pointing to `/pieces/{color}/{type}.png`. Vite serves `public/` at root. Use `object-fit: contain` since king/knight PNGs have non-square aspect ratios.
 - **Board coordinates:** `row` 0-7 (top to bottom), `col` 0-7 (left to right). Row 0 = rank 8, row 7 = rank 1.
 - **Piece identity:** Each piece gets a unique ID at game start (e.g., `w-Q-1`, `b-N-2`). Tracked through degradation.
 - **Hot reload:** Vite HMR means saved file changes appear instantly in browser. Build phases incrementally.
 - **CSS-only effects:** Smoke, highlights, and animations are pure CSS — no canvas or WebGL needed.
+- **Piece drop shadow:** All pieces get `filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5))` for depth against the board.
 - **Mobile-friendly (stretch goal):** CSS grid adapts. Touch events work like click events.
