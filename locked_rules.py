@@ -78,3 +78,45 @@ def build_locked_config(**overrides: object) -> RuleConfig:
     }
     defaults.update(overrides)
     return RuleConfig(**defaults)
+
+
+def build_corrected_config(**overrides: object) -> RuleConfig:
+    """Build a RuleConfig aligned with designer's intent.
+
+    Changes from build_locked_config:
+    - win_condition: checkmate_only (not king_capture)
+    - retaliation_mode: attacker_rekill (not defender_strike)
+    - stalemate_is_loss: False (standard stalemate = draw)
+    - king_move_mode: normal (per RULES.md)
+    - king_capture_insta_kill: on (king permakill is in RULES.md)
+    """
+    defaults = {
+        "ruleset": "matryoshka",
+        "tier2_slider_max_range": 5,
+        "tier3_slider_max_range": 1,
+        "win_condition": "checkmate_only",
+        "stalemate_is_loss": False,
+        "ko_repetition_illegal": True,
+        "king_move_mode": "normal",
+        "king_capture_insta_kill": "on",
+        "king_infinite_kill": False,
+        "king_dash_max": 2,
+        "king_k_range": 2,
+        "king_capture_line_range": 3,
+        "quiet_halfmove_limit": 60,
+        "retaliation_enabled": True,
+        "retaliation_mode": "attacker_rekill",
+        "retaliation_targeting": "highest_unsafe",
+        "retaliation_local_radius": 4,
+        "retaliation_tiebreak": "random",
+        "retaliation_strike_window": 1,
+        "strike_effect": "perma_kill",
+        "fallback_policy": "random",
+        "doom_clock_full_moves": 0,
+        "doom_clock_effect": "demote_random_non_king",
+        "knight_decay_mode": "wazir",
+        "collapse_target": "pawn",
+        "crippled_pawn_can_promote": False,
+    }
+    defaults.update(overrides)
+    return RuleConfig(**defaults)

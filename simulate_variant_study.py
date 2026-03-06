@@ -126,6 +126,7 @@ class Piece:
     tier: int = 1
     retaliation_target: Optional[int] = None
     retaliation_window: int = 0
+    permakill_vulnerable: int = 0
     crippled: bool = False
 
     def clone(self) -> "Piece":
@@ -171,10 +172,11 @@ class RuleConfig:
     king_capture_line_range: int = 2
     king_capture_insta_kill: str = "on"  # on | off | adjacent_only
     retaliation_enabled: bool = True
-    retaliation_targeting: str = "highest_safe"  # highest_safe | localized_safe | top2_pool_safe
+    retaliation_targeting: str = "highest_safe"  # highest_safe | localized_safe | top2_pool_safe | highest_unsafe | any_unsafe
     retaliation_local_radius: int = 4
     retaliation_tiebreak: str = "random"  # random | max_threat | min_king_distance
     strike_effect: str = "perma_kill"  # perma_kill | double_demote
+    retaliation_mode: str = "defender_strike"  # defender_strike | attacker_rekill
     stalemate_is_loss: bool = False
     ko_repetition_illegal: bool = False
     doom_clock_full_moves: int = 0
@@ -910,20 +912,25 @@ class GameState:
             reverse=True,
         )
 
-        if self.rules.retaliation_targeting == "top2_pool_safe":
+        if self.rules.retaliation_targeting == "any_unsafe":
+            # Target any enemy piece — widens the candidate pool dramatically.
+            selected_targets = list(targets)
+        elif self.rules.retaliation_targeting == "top2_pool_safe":
             allowed_target_ids = {p.id for p in targets_sorted[:2]}
+            selected_targets = [p for p in targets if p.id in allowed_target_ids]
         else:
             top_pr = PIECE_VALUE_PRIORITY.get(targets_sorted[0].kind, 0)
             allowed_target_ids = {
                 p.id for p in targets_sorted if PIECE_VALUE_PRIORITY.get(p.kind, 0) == top_pr
             }
-
-        selected_targets = [p for p in targets if p.id in allowed_target_ids]
+            selected_targets = [p for p in targets if p.id in allowed_target_ids]
 
         targets_by_priority: Dict[int, List[Piece]] = defaultdict(list)
         for target in selected_targets:
             pr = PIECE_VALUE_PRIORITY.get(target.kind, 0)
             targets_by_priority[pr].append(target)
+
+        skip_safety = self.rules.retaliation_targeting in ("highest_unsafe", "any_unsafe")
 
         for pr in sorted(targets_by_priority.keys(), reverse=True):
             candidates: List[Tuple[int, int]] = []
@@ -936,16 +943,17 @@ class GameState:
                     ):
                         continue
 
-                    # Build temporary board occupancy for the safety test.
-                    temp_board = self.board.copy()
-                    temp_board[sq] = demoted_piece.id
-                    if self._piece_can_attack_square(
-                        target,
-                        target.square,
-                        sq,
-                        board_override=temp_board,
-                    ):
-                        continue
+                    if not skip_safety:
+                        # Build temporary board occupancy for the safety test.
+                        temp_board = self.board.copy()
+                        temp_board[sq] = demoted_piece.id
+                        if self._piece_can_attack_square(
+                            target,
+                            target.square,
+                            sq,
+                            board_override=temp_board,
+                        ):
+                            continue
                     candidates.append((target.id, sq))
 
             if candidates:
@@ -1042,8 +1050,16 @@ class GameState:
             target_id, sq = self._choose_retaliation_candidate(piece, candidates)
             self.board[sq] = piece.id
             piece.square = sq
-            piece.retaliation_target = target_id
-            piece.retaliation_window = self.rules.retaliation_strike_window
+            if self.rules.retaliation_mode == "attacker_rekill":
+                # Designer's intent: the respawned piece is vulnerable to permakill.
+                # The capturing side must re-kill it within N moves or it stays.
+                piece.permakill_vulnerable = self.rules.retaliation_strike_window
+                piece.retaliation_target = None
+                piece.retaliation_window = 0
+            else:
+                # Original implementation: respawned piece gets a revenge kill window.
+                piece.retaliation_target = target_id
+                piece.retaliation_window = self.rules.retaliation_strike_window
             event.retaliation_target_id = target_id
             if target_id in self.pieces:
                 event.retaliation_target_kind = self.pieces[target_id].kind
@@ -1172,7 +1188,22 @@ class GameState:
                 permanent = True
                 reason = "king_capture_rule"
 
-            if mover.retaliation_window > 0:
+            # Attacker-rekill mode: if the captured piece is vulnerable (just
+            # respawned via retaliation), re-capturing it is a permanent kill.
+            if (
+                self.rules.retaliation_mode == "attacker_rekill"
+                and captured.permakill_vulnerable > 0
+            ):
+                self.stats["retarget_captures_attempted"] += 1
+                self.stats["retarget_captures_success"] += 1
+                permanent = True
+                reason = "retaliation_strike"
+
+            # Defender-strike mode (original): mover executes revenge kill on target.
+            if (
+                self.rules.retaliation_mode == "defender_strike"
+                and mover.retaliation_window > 0
+            ):
                 self.stats["retarget_captures_attempted"] += 1
                 if mover.retaliation_target == captured_id:
                     self.stats["retarget_captures_success"] += 1
@@ -1339,12 +1370,23 @@ class GameState:
             if self.terminated:
                 return event
 
-        # If this piece had a one-move retaliation strike window, consume it.
+        # Defender-strike mode: consume mover's retaliation window.
         if self.rules.ruleset == "matryoshka" and mover.retaliation_window > 0:
             mover.retaliation_window -= 1
             if mover.retaliation_window <= 0:
                 mover.retaliation_window = 0
                 mover.retaliation_target = None
+
+        # Attacker-rekill mode: decrement vulnerability window for opponent pieces.
+        # The moving side is the "capturer" — their opponent's pieces lose vulnerability.
+        if (
+            self.rules.ruleset == "matryoshka"
+            and self.rules.retaliation_mode == "attacker_rekill"
+        ):
+            moving_side = mover.color
+            for piece in self.pieces.values():
+                if piece.color != moving_side and piece.permakill_vulnerable > 0:
+                    piece.permakill_vulnerable -= 1
 
         # Promotion is always to full-tier queen in this simulation.
         if mover.kind == "P":

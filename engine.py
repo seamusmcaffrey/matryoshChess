@@ -221,6 +221,24 @@ def _retaliation_threat_score(
     return total * profile.retaliation_weight
 
 
+def _permakill_vulnerability_score(game: GameState, perspective: str) -> float:
+    """Score for attacker-rekill mode: value capturing vulnerable enemy pieces,
+    penalize having own vulnerable pieces."""
+    score = 0.0
+    for piece in game.pieces.values():
+        if piece.permakill_vulnerable <= 0:
+            continue
+        value = game._material_value(piece)
+        urgency = min(1.0, 0.4 + 0.3 * piece.permakill_vulnerable)
+        if piece.color != perspective:
+            # Enemy piece is vulnerable — we want to capture it (bonus).
+            score += value * urgency * 0.6
+        else:
+            # Our piece is vulnerable — opponent wants to capture it (penalty).
+            score -= value * urgency * 0.4
+    return score
+
+
 def _king_execution_potential(game: GameState, perspective: str) -> float:
     our_king_sq = game._king_square(perspective)
     if our_king_sq is None:
@@ -323,6 +341,9 @@ def evaluate_position_v2(
     # Retaliation threat valuation.
     if game.rules.ruleset == "matryoshka" and game.rules.retaliation_enabled:
         score += _retaliation_threat_score(game, color, profile) * 0.55
+        # Attacker-rekill: value capturing vulnerable pieces / protect own.
+        if game.rules.retaliation_mode == "attacker_rekill":
+            score += _permakill_vulnerability_score(game, color) * 0.50
 
     # King safety (higher in opening/middlegame).
     own_king_pen = _king_safety_penalty(game, color)

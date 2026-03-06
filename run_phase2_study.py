@@ -33,7 +33,7 @@ from engine import (
     choose_move_v2_with_info,
     should_resign,
 )
-from locked_rules import build_locked_config
+from locked_rules import build_corrected_config, build_locked_config
 from simulate_variant_study import (
     BLACK,
     DRAW,
@@ -175,6 +175,113 @@ def build_catalog(sample_scale: float) -> Dict[str, StudyConfig]:
                 retaliation_enabled=True,
                 doom_clock_full_moves=32,
                 doom_clock_effect="bonus_capture_damage",
+            ),
+            games=_scaled_games(400, sample_scale),
+        ),
+        # Phase 3: isolate retaliation by relaxing structural locks
+        "relaxed_no_ret": StudyConfig(
+            name="relaxed_no_ret",
+            description="Relaxed locks (no stalemate_is_loss, normal king), no retaliation",
+            rules=build_locked_config(
+                retaliation_enabled=False,
+                stalemate_is_loss=False,
+                king_move_mode="normal",
+            ),
+            games=_scaled_games(400, sample_scale),
+        ),
+        "relaxed_ret_safe": StudyConfig(
+            name="relaxed_ret_safe",
+            description="Relaxed locks + retaliation (safe targeting)",
+            rules=build_locked_config(
+                retaliation_enabled=True,
+                stalemate_is_loss=False,
+                king_move_mode="normal",
+            ),
+            games=_scaled_games(400, sample_scale),
+        ),
+        "relaxed_ret_unsafe": StudyConfig(
+            name="relaxed_ret_unsafe",
+            description="Relaxed locks + retaliation (unsafe targeting, any piece)",
+            rules=build_locked_config(
+                retaliation_enabled=True,
+                stalemate_is_loss=False,
+                king_move_mode="normal",
+                retaliation_targeting="any_unsafe",
+                retaliation_strike_window=2,
+                strike_effect="perma_kill",
+            ),
+            games=_scaled_games(400, sample_scale),
+        ),
+        "relaxed_ret_highest_unsafe": StudyConfig(
+            name="relaxed_ret_highest_unsafe",
+            description="Relaxed locks + retaliation (unsafe, highest target only)",
+            rules=build_locked_config(
+                retaliation_enabled=True,
+                stalemate_is_loss=False,
+                king_move_mode="normal",
+                retaliation_targeting="highest_unsafe",
+                retaliation_strike_window=2,
+                strike_effect="perma_kill",
+            ),
+            games=_scaled_games(400, sample_scale),
+        ),
+        "locked_ret_unsafe": StudyConfig(
+            name="locked_ret_unsafe",
+            description="Full locks + unsafe retaliation (any piece)",
+            rules=build_locked_config(
+                retaliation_enabled=True,
+                retaliation_targeting="any_unsafe",
+                retaliation_strike_window=2,
+                strike_effect="perma_kill",
+            ),
+            games=_scaled_games(400, sample_scale),
+        ),
+        "relaxed_stalemate_only": StudyConfig(
+            name="relaxed_stalemate_only",
+            description="King_capture_line but stalemate=draw, with retaliation",
+            rules=build_locked_config(
+                retaliation_enabled=True,
+                stalemate_is_loss=False,
+            ),
+            games=_scaled_games(400, sample_scale),
+        ),
+        # Phase 4: Designer's corrected retaliation (attacker must re-kill)
+        "v4_baseline": StudyConfig(
+            name="v4_baseline",
+            description="Corrected design: attacker-rekill, highest_unsafe, checkmate_only, king permakill ON",
+            rules=build_corrected_config(),
+            games=_scaled_games(400, sample_scale),
+        ),
+        "v4_window2": StudyConfig(
+            name="v4_window2",
+            description="Corrected design with strike window=2",
+            rules=build_corrected_config(retaliation_strike_window=2),
+            games=_scaled_games(400, sample_scale),
+        ),
+        "v4_any_target": StudyConfig(
+            name="v4_any_target",
+            description="Corrected design, any_unsafe targeting (wider placement)",
+            rules=build_corrected_config(retaliation_targeting="any_unsafe"),
+            games=_scaled_games(400, sample_scale),
+        ),
+        "v4_no_ret": StudyConfig(
+            name="v4_no_ret",
+            description="Corrected design, NO retaliation (degradation-only baseline)",
+            rules=build_corrected_config(retaliation_enabled=False),
+            games=_scaled_games(400, sample_scale),
+        ),
+        "v4_no_king_permakill": StudyConfig(
+            name="v4_no_king_permakill",
+            description="Corrected design, king permakill OFF (isolate king impact)",
+            rules=build_corrected_config(king_capture_insta_kill="off"),
+            games=_scaled_games(400, sample_scale),
+        ),
+        "v4_defender_strike": StudyConfig(
+            name="v4_defender_strike",
+            description="Old mechanic (defender revenge kill) for A/B comparison",
+            rules=build_corrected_config(
+                retaliation_mode="defender_strike",
+                retaliation_targeting="highest_unsafe",
             ),
             games=_scaled_games(400, sample_scale),
         ),
@@ -659,6 +766,14 @@ def _retaliation_is_positive(results: Dict[str, Dict[str, object]]) -> bool:
     )
     strike_success = float(ret.get("retaliation_target_capture_success_rate", 0.0))
 
+    # In low-draw regimes (<10%), pp delta is misleading. Use relative
+    # reduction and activity metrics instead.
+    no_ret_draw = float(no_ret.get("draw_rate", 0.0))
+    if no_ret_draw < 0.10:
+        # Low-draw regime: retaliation is positive if it adds meaningful
+        # activity (redeployments + strike success) regardless of draw delta.
+        mean_redeploy = float(ret.get("mean_redeployments", 0.0))
+        return (mean_redeploy >= 3.0 and strike_success >= 0.30) or draw_delta >= 0.03
     return (draw_delta >= 0.05) or (swing_delta >= 4.0) or (
         threat_delta >= 2.0 and strike_success >= 0.20
     )
